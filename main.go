@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,24 +21,35 @@ var (
 
 	tuners = []tuner{
 		{
-			url:   "http://192.168.1.168/0.ts",
-			pre:   "/opt/opendct/prebmitune.sh",
-			start: "/opt/opendct/bmitune.sh",
-			stop:  "/opt/opendct/stopbmitune.sh",
+			url:   "http://10.0.0.28/0.ts",
+			name:   "tuner1",
 		},
 		{
-			url:   "http://192.168.1.169/main",
-			pre:   "/opt/opendct/prebmituneb.sh",
-			start: "/opt/opendct/bmituneb.sh",
-			stop:  "/opt/opendct/stopbmituneb.sh",
+			url:   "http://10.0.0.29/0.ts",
+			name:   "tuner3",
+		},
+		{
+			url:   "http://10.0.0.31/0.ts",
+			name:   "tuner0",
+		},
+		{
+			url:   "http://10.0.0.30/live/stream0",
+			name:   "tuner2",
 		},
 	}
 )
 
 type tuner struct {
 	url              string
-	pre, start, stop string
+	name             string
 	active           bool
+}
+
+// status page type
+type ExportedTuner struct {
+	Name    string
+	Url     string
+	Active  bool
 }
 
 type reader struct {
@@ -59,24 +71,12 @@ func init() {
 func (r *reader) Read(p []byte) (int, error) {
 	if !r.started {
 		r.started = true
-		go func() {
-			if err := execute(r.t.pre); err != nil {
-				log.Printf("[ERR] Failed to run pre script: %v", err)
-				return
-			}
-			if err := execute(r.t.start, r.channel); err != nil {
-				log.Printf("[ERR] Failed to run start script: %v", err)
-				return
-			}
-		}()
 	}
 	return r.ReadCloser.Read(p)
 }
 
 func (r *reader) Close() error {
-	if err := execute(r.t.stop); err != nil {
-		log.Printf("[ERR] Failed to run stop script: %v", err)
-	}
+	stopplayer(r.t.name)
 	tunerLock.Lock()
 	r.t.active = false
 	tunerLock.Unlock()
@@ -94,6 +94,47 @@ func execute(args ...string) error {
 	return err
 }
 
+func tuneplayer(tunername, channel string) bool{
+	t0 := time.Now()
+	log.Printf("Started tuning TMSID %v on %v", channel, tunername)
+	client := &http.Client{}
+	var data = strings.NewReader("{\"entity_id\": \"media_player." + tunername + "\", \"media_content_type\": \"url\", \"media_content_id\": \"spectrumTV://watch.spectrum.net/livetv/" + channel + "\"}")
+	req, err := http.NewRequest("POST", "http://10.0.0.22:8123/api/services/media_player/play_media", data)
+	if err != nil {
+		log.Printf("[ERR] Failed to create tune script: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI0MmY1YWNlMzNiNDQ0MThlYWFiYjIzZmMyZTE1Zjg0ZSIsImlhdCI6MTcwMDY4OTUxNSwiZXhwIjoyMDE2MDQ5NTE1fQ.ir4u10uOP3FweZ469HdpXszAMaE45c1onbJzQnTf4XU")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[ERR] %v Failed to tune Tuner %v, retrying", err, tunername)
+		return false
+	} else if resp.StatusCode != 200 {
+		log.Printf("Tuning call failed on Tuner %v, retrying. [ERR] %v", tunername, resp.Status)
+		return false
+	}
+	log.Printf("Finished tuning in %v", time.Since(t0))
+	return true	
+}
+
+func stopplayer(tunername string) {
+	t0 := time.Now()
+	log.Printf("Stopping tuner %v", tunername)
+	client := &http.Client{}
+	var data = strings.NewReader("{\"entity_id\": \"remote." + tunername + "\", \"command\": \"menu\"}")
+	req, err := http.NewRequest("POST", "http://10.0.0.22:8123/api/services/remote/send_command", data)
+	if err != nil {
+		log.Printf("[ERR] Failed to create stop tune script: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI0MmY1YWNlMzNiNDQ0MThlYWFiYjIzZmMyZTE1Zjg0ZSIsImlhdCI6MTcwMDY4OTUxNSwiZXhwIjoyMDE2MDQ5NTE1fQ.ir4u10uOP3FweZ469HdpXszAMaE45c1onbJzQnTf4XU")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[ERR] Tuner stop call failed: %v\n%v", err, resp.Status)
+	}
+	log.Printf("Stopped tuner %v in %v", tunername, time.Since(t0))	
+}
+
 func tune(idx, channel string) (io.ReadCloser, error) {
 	tunerLock.Lock()
 	defer tunerLock.Unlock()
@@ -106,6 +147,10 @@ func tune(idx, channel string) (io.ReadCloser, error) {
 				continue
 			}
 			t = &tuners[i]
+	    var chkTune bool = tuneplayer(t.name, channel)
+	    if !chkTune {
+	      continue
+	    }
 			break
 		}
 	} else {
@@ -118,6 +163,7 @@ func tune(idx, channel string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("tuner not available")
 	}
 
+ 
 	resp, err := http.Get(t.url)
 	if err != nil {
 		log.Printf("[ERR] Failed to fetch source: %v", err)
@@ -133,10 +179,16 @@ func tune(idx, channel string) (io.ReadCloser, error) {
 		channel:    channel,
 		t:          t,
 	}, nil
+
 }
 
 func run() error {
-	r := gin.Default()
+  gin.SetMode(gin.ReleaseMode)
+  r := gin.New()
+  r.Use(
+      gin.LoggerWithWriter(gin.DefaultWriter, "/api/status"),
+      gin.Recovery(),
+  )	
 	r.SetTrustedProxies(nil)
 	r.GET("/play/tuner:tuner/:channel", func(c *gin.Context) {
 		tuner := c.Param("tuner")
@@ -159,6 +211,9 @@ func run() error {
 
 		io.Copy(c.Writer, reader)
 	})
+
+	r.GET("/api/status", apiStatusHandler)
+
 	return r.Run(":7654")
 }
 
@@ -167,4 +222,24 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+//Tuner Status
+func apiStatusHandler(c *gin.Context) {
+
+	tunerLock.Lock()
+	exportedTuners := make([]ExportedTuner, len(tuners))
+	for i, t := range tuners {
+		exportedTuners[i] = ExportedTuner{
+			Name:    t.name,
+			Url:     t.url,
+			Active:  t.active,
+		}
+	}
+	tunerLock.Unlock()
+
+	// Response with JSON
+	c.JSON(http.StatusOK, gin.H{
+		"Tuners":        exportedTuners,
+	})
 }
