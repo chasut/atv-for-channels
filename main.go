@@ -103,7 +103,7 @@ func tuneplayer(tunername, channel string) bool{
 	if err != nil {
 		log.Printf("[ERR] Failed to create tune script: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI0MmY1YWNlMzNiNDQ0MThlYWFiYjIzZmMyZTE1Zjg0ZSIsImlhdCI6MTcwMDY4OTUxNSwiZXhwIjoyMDE2MDQ5NTE1fQ.ir4u10uOP3FweZ469HdpXszAMaE45c1onbJzQnTf4XU")
+	req.Header.Set("Authorization", "[Insert HA Bearer Token]")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -126,7 +126,7 @@ func stopplayer(tunername string) {
 	if err != nil {
 		log.Printf("[ERR] Failed to create stop tune script: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI0MmY1YWNlMzNiNDQ0MThlYWFiYjIzZmMyZTE1Zjg0ZSIsImlhdCI6MTcwMDY4OTUxNSwiZXhwIjoyMDE2MDQ5NTE1fQ.ir4u10uOP3FweZ469HdpXszAMaE45c1onbJzQnTf4XU")
+	req.Header.Set("Authorization", "[Insert HA Bearer Token")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
